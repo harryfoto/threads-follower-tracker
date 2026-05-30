@@ -1,0 +1,8 @@
+{
+  "name": "threads-follower-tracker",
+  "version": "1.0.0",
+  "dependencies": {
+    "playwright": "^1.53.0",
+    "nodemailer": "^6.10.0"
+  }
+}
