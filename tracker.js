@@ -19,8 +19,13 @@ const { chromium } = require('playwright');
 
   const html = await page.content();
 
+  const match =
+    html.match(
+      /"follower_count":(\d+)/
+    );
+
   console.log(
-    html.includes('jeju_harry')
+    match ? match[1] : 'NOT_FOUND'
   );
 
   await browser.close();
