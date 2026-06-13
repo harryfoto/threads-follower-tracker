@@ -38,7 +38,7 @@ const { chromium } = require('playwright');
 
   const response =
     await fetch(
-      'https://script.google.com/macros/s/AKfycbxUNGD5Ko1kSIdEhAv_Utuhth3gUGSKW7wLH0RKEzLtFOGla_dpBGLcGQvCcUoYpqzLsg/exec',
+      'https://script.google.com/macros/s/AKfycbxszjhcDEekMcZo_iiof0elbeouXA38g7L-oejw4lOtJy3XLkmdNp42uX6E7RBciWWxpA/exec',      
       {
         method: 'POST',
         headers: {
