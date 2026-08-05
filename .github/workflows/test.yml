@@ -1,28 +1,30 @@
 name: Threads Tracker
 
 on:
-
   workflow_dispatch:
-
   schedule:
-    - cron: '55 20 * * *'
+    - cron: '55 20 * * *'   # 20:55 UTC = 05:55 KST
+
+concurrency:
+  group: threads-tracker
+  cancel-in-progress: false
 
 jobs:
-
   track:
-
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
+      - uses: actions/checkout@v5
 
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
 
       - run: npm install
 
-      - run: npx playwright install chromium
+      - run: npx playwright install --with-deps chromium
 
       - run: node tracker.js
+        env:
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
