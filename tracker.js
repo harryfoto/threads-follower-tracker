@@ -1,60 +1,114 @@
 const { chromium } = require('playwright');
 
-(async () => {
+const PROFILE_URL = 'https://www.threads.com/@jeju_harry';
+const WEBHOOK_URL = process.env.WEBHOOK_URL;
+const MAX_ATTEMPTS = 3;
 
-  const browser = await chromium.launch({
-    headless: true
-  });
+const UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+  '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
-  const page = await browser.newPage();
+function extractFollowers(html) {
+  // 1순위: 임베디드 JSON
+  const json = html.match(/"follower_count"\s*:\s*(\d+)/);
+  if (json) return Number(json[1]);
 
-  await page.goto(
-    'https://www.threads.net/@jeju_harry',
-    {
-      waitUntil: 'networkidle'
+  // 2순위: meta description ("1,234 followers")
+  const meta = html.match(/([\d,.]+)\s*(?:followers|팔로워)/i);
+  if (meta) return Number(meta[1].replace(/[,.]/g, ''));
+
+  return null;
+}
+
+async function scrapeOnce(attempt) {
+  const browser = await chromium.launch({ headless: true });
+
+  try {
+    const context = await browser.newContext({
+      userAgent: UA,
+      locale: 'ko-KR',
+      viewport: { width: 1280, height: 800 },
+    });
+
+    const page = await context.newPage();
+
+    // networkidle 대신 domcontentloaded 사용 (Threads는 폴링이 계속 돌아
+    // networkidle이 영영 안 잡히는 경우가 있음)
+    const response = await page.goto(PROFILE_URL, {
+      waitUntil: 'domcontentloaded',
+      timeout: 45000,
+    });
+
+    if (!response || !response.ok()) {
+      throw new Error(
+        `HTTP ${response ? response.status() : 'no response'}`
+      );
     }
-  );
 
-  await page.waitForTimeout(5000);
+    await page.waitForTimeout(5000);
 
-  const html = await page.content();
+    const html = await page.content();
+    const followers = extractFollowers(html);
 
-  const match =
-    html.match(/"follower_count":(\d+)/);
+    if (followers === null) {
+      const loginWall = /log in|로그인/i.test(html) && html.length < 200000;
+      throw new Error(
+        loginWall
+          ? '로그인 페이지가 반환됨 (봇 차단 의심)'
+          : `팔로워 수를 찾지 못함 (HTML ${html.length}자)`
+      );
+    }
 
-  if (!match) {
-    throw new Error(
-      'Follower count not found'
-    );
+    return followers;
+  } finally {
+    await browser.close();
+  }
+}
+
+(async () => {
+  let followers = null;
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      followers = await scrapeOnce(attempt);
+      console.log(`[시도 ${attempt}] 성공 — 팔로워: ${followers}`);
+      break;
+    } catch (err) {
+      lastError = err;
+      console.warn(`[시도 ${attempt}/${MAX_ATTEMPTS}] 실패: ${err.message}`);
+      if (attempt < MAX_ATTEMPTS) {
+        const backoff = attempt * 15000;
+        console.log(`${backoff / 1000}초 후 재시도...`);
+        await new Promise((r) => setTimeout(r, backoff));
+      }
+    }
   }
 
-  const followers =
-    Number(match[1]);
+  if (followers === null) {
+    console.error('모든 시도 실패');
+    throw lastError;
+  }
 
-  console.log(
-    'Followers:',
-    followers
-  );
+  if (!WEBHOOK_URL) {
+    console.warn('WEBHOOK_URL 미설정 — 전송 건너뜀');
+    return;
+  }
 
-  const response =
-    await fetch(
-      'https://script.google.com/macros/s/AKfycbxszjhcDEekMcZo_iiof0elbeouXA38g7L-oejw4lOtJy3XLkmdNp42uX6E7RBciWWxpA/exec',      
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type':
-            'application/json'
-        },
-        body: JSON.stringify({
-          followers
-        })
-      }
-    );
+  const res = await fetch(WEBHOOK_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ followers, date: new Date().toISOString() }),
+  });
 
-  console.log(
-    await response.text()
-  );
+  const body = await res.text();
 
-  await browser.close();
+  if (!res.ok) {
+    throw new Error(`전송 실패: HTTP ${res.status} — ${body.slice(0, 200)}`);
+  }
 
-})();
+  console.log('전송 완료:', body.slice(0, 200));
+})().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
